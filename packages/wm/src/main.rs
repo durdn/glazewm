@@ -11,7 +11,7 @@
 
 #[cfg(target_os = "macos")]
 use std::io::IsTerminal;
-use std::{env, path::PathBuf, process, time::Duration};
+use std::{env, io::Write, path::PathBuf, process, time::Duration};
 
 use anyhow::{Context, Error};
 use tokio::{process::Command, signal};
@@ -45,11 +45,34 @@ mod user_config;
 mod wm;
 mod wm_state;
 
+/// Installs a panic hook that writes directly to `errors.log` before the
+/// process aborts. Writing directly to disk (not via tracing) is critical
+/// — tracing's buffered writer may not flush before abort.
+fn install_panic_hook() {
+  std::panic::set_hook(Box::new(|info| {
+    let log_path = home::home_dir().map_or_else(
+      || std::path::PathBuf::from("errors.log"),
+      |h| h.join(".glzr/glazewm/errors.log"),
+    );
+
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+      .create(true)
+      .append(true)
+      .open(&log_path)
+    {
+      let _ = writeln!(file, "PANIC: {info}");
+      let _ = file.flush();
+    }
+  }));
+}
+
 /// Main entry point for the application.
 ///
 /// Conditionally starts the WM or runs a CLI command based on the given
 /// subcommand.
 fn main() -> anyhow::Result<()> {
+  install_panic_hook();
+
   let args = std::env::args().collect::<Vec<_>>();
   let app_command = AppCommand::parse_with_default(&args);
 
@@ -304,7 +327,22 @@ fn setup_logging(verbosity: &Verbosity) -> anyhow::Result<()> {
     .join(".glzr/glazewm/");
 
   let error_writer =
-    tracing_appender::rolling::never(error_log_dir, "errors.log");
+    tracing_appender::rolling::never(&error_log_dir, "errors.log");
+
+  // Write a startup marker directly to errors.log (bypassing the buffered
+  // tracing writer) so we can confirm the binary ran and when.
+  if let Ok(mut file) = std::fs::OpenOptions::new()
+    .create(true)
+    .append(true)
+    .open(error_log_dir.join("errors.log"))
+  {
+    let now = std::time::SystemTime::now()
+      .duration_since(std::time::UNIX_EPOCH)
+      .map(|d| d.as_secs())
+      .unwrap_or(0);
+    let _ = writeln!(file, "START: glazewm started (unix={now})");
+    let _ = file.flush();
+  }
 
   let subscriber = tracing_subscriber::registry()
     .with(
