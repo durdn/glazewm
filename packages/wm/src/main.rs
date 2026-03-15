@@ -30,8 +30,12 @@ use wm_platform::{
 };
 
 use crate::{
-  ipc_server::IpcServer, sys_tray::SystemTray, user_config::UserConfig,
+  ipc_server::IpcServer,
+  sys_tray::SystemTray,
+  traits::CommonGetters,
+  user_config::UserConfig,
   wm::WindowManager,
+  wm_state::WmState,
 };
 
 mod commands;
@@ -64,6 +68,76 @@ fn install_panic_hook() {
       let _ = file.flush();
     }
   }));
+}
+
+/// Logs committed and working-set memory with key container counts.
+///
+/// Written at `Level::ERROR` so it appears in the error log. Used to
+/// detect unbounded memory growth between restarts.
+fn log_memory_diagnostics(state: &WmState) {
+  #[cfg(target_os = "windows")]
+  if let Some((ws_mb, commit_mb)) = memory_mb() {
+    let mon = state.monitors().len();
+    let ws = state.workspaces().len();
+    let win = state.windows().len();
+    let tree = state.root_container.descendants().count();
+    let ign = state.ignored_windows.len();
+    let ghosts = state.disconnected_monitors.len();
+    tracing::error!(
+      "MEM: ws={ws_mb}MB commit={commit_mb}MB | mon={mon} ws={ws} \
+       win={win} tree={tree} ign={ign} ghosts={ghosts}"
+    );
+  }
+}
+
+/// Returns `(working_set_mb, committed_mb)` for the current process.
+///
+/// `working_set_size` reflects only RAM-resident pages; `pagefile_usage`
+/// (committed virtual memory) is the true allocation metric and includes
+/// pages currently backed by the pagefile.
+#[cfg(target_os = "windows")]
+fn memory_mb() -> Option<(usize, usize)> {
+  // SAFETY: Declare the Win32 APIs needed for memory diagnostics.
+  // `GetCurrentProcess` returns a pseudo-handle that is always valid.
+  // `K32GetProcessMemoryInfo` fills `pmc` on success (non-zero return).
+  #[repr(C)]
+  #[allow(non_snake_case, non_camel_case_types)]
+  struct PROCESS_MEMORY_COUNTERS {
+    cb: u32,
+    PageFaultCount: u32,
+    PeakWorkingSetSize: usize,
+    WorkingSetSize: usize,
+    QuotaPeakPagedPoolUsage: usize,
+    QuotaPagedPoolUsage: usize,
+    QuotaPeakNonPagedPoolUsage: usize,
+    QuotaNonPagedPoolUsage: usize,
+    PagefileUsage: usize,
+    PeakPagefileUsage: usize,
+  }
+
+  extern "system" {
+    fn GetCurrentProcess() -> isize;
+    fn K32GetProcessMemoryInfo(
+      process: isize,
+      pmc: *mut PROCESS_MEMORY_COUNTERS,
+      cb: u32,
+    ) -> i32;
+  }
+
+  unsafe {
+    let handle = GetCurrentProcess();
+    let mut pmc = std::mem::zeroed::<PROCESS_MEMORY_COUNTERS>();
+    pmc.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+
+    if K32GetProcessMemoryInfo(handle, &mut pmc, pmc.cb) != 0 {
+      Some((
+        pmc.WorkingSetSize / (1024 * 1024),
+        pmc.PagefileUsage / (1024 * 1024),
+      ))
+    } else {
+      None
+    }
+  }
 }
 
 /// Main entry point for the application.
@@ -235,6 +309,8 @@ async fn start_wm(
         wm.process_event(PlatformEvent::Keybinding(event), &mut config)
       }
       _ = cleanup_interval.tick() => {
+        log_memory_diagnostics(&wm.state);
+
         // Re-register keyboard hook — Windows silently drops
         // WH_KEYBOARD_LL hooks after system events (sleep/wake,
         // lock screen, UAC, display changes, hook timeout).
@@ -315,7 +391,6 @@ async fn start_wm(
 
     if let Err(err) = res {
       tracing::error!("{:?}", err);
-      dispatcher.show_error_dialog("Non-fatal error", &err.to_string());
     }
   }
 
