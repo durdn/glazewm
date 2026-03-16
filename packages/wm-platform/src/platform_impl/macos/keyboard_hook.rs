@@ -112,6 +112,7 @@ impl KeyboardHook {
   ///
   /// On macOS, `CGEventTap` hooks are not silently unregistered by the OS
   /// (unlike `WH_KEYBOARD_LL` on Windows), so this is a no-op.
+  #[allow(clippy::unnecessary_wraps, clippy::unused_self)]
   pub fn rehook(&mut self) -> crate::Result<()> {
     Ok(())
   }

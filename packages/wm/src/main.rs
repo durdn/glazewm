@@ -30,12 +30,8 @@ use wm_platform::{
 };
 
 use crate::{
-  ipc_server::IpcServer,
-  sys_tray::SystemTray,
-  traits::CommonGetters,
-  user_config::UserConfig,
-  wm::WindowManager,
-  wm_state::WmState,
+  ipc_server::IpcServer, sys_tray::SystemTray, traits::CommonGetters,
+  user_config::UserConfig, wm::WindowManager, wm_state::WmState,
 };
 
 mod commands;
