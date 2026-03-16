@@ -10,7 +10,7 @@ use crate::{
   wm_state::{DisconnectedMonitor, WmState},
 };
 
-const GHOST_TTL: Duration = Duration::from_secs(3600);
+const GHOST_TTL: Duration = Duration::from_hours(1);
 
 /// Records a monitor's identity and workspaces before removing it from
 /// the container tree. This allows workspace restoration when the same

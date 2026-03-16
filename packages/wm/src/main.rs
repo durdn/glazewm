@@ -123,9 +123,10 @@ fn memory_mb() -> Option<(usize, usize)> {
   unsafe {
     let handle = GetCurrentProcess();
     let mut pmc = std::mem::zeroed::<PROCESS_MEMORY_COUNTERS>();
-    pmc.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+    pmc.cb = u32::try_from(std::mem::size_of::<PROCESS_MEMORY_COUNTERS>())
+      .unwrap_or_default();
 
-    if K32GetProcessMemoryInfo(handle, &mut pmc, pmc.cb) != 0 {
+    if K32GetProcessMemoryInfo(handle, &raw mut pmc, pmc.cb) != 0 {
       Some((
         pmc.WorkingSetSize / (1024 * 1024),
         pmc.PagefileUsage / (1024 * 1024),
@@ -416,8 +417,7 @@ fn setup_logging(verbosity: &Verbosity) -> anyhow::Result<()> {
   {
     let now = std::time::SystemTime::now()
       .duration_since(std::time::UNIX_EPOCH)
-      .map(|d| d.as_secs())
-      .unwrap_or(0);
+      .map_or(0, |d| d.as_secs());
     let _ = writeln!(file, "START: glazewm started (unix={now})");
     let _ = file.flush();
   }
