@@ -66,23 +66,42 @@ fn install_panic_hook() {
   }));
 }
 
-/// Logs committed and working-set memory with key container counts.
+/// Logs committed and working-set memory, system available RAM, and key
+/// container counts.
 ///
-/// Written at `Level::ERROR` so it appears in the error log. Used to
-/// detect unbounded memory growth between restarts.
+/// Written directly to `errors.log` (unbuffered), bypassing the tracing
+/// buffer so the line is on disk even if the process aborts immediately
+/// after. The `avail=` field reflects system-wide free physical RAM and
+/// distinguishes glazewm-internal OOM from system memory pressure.
 fn log_memory_diagnostics(state: &WmState) {
   #[cfg(target_os = "windows")]
   if let Some((ws_mb, commit_mb)) = memory_mb() {
+    let avail_mb = system_avail_mb().unwrap_or(0);
     let mon = state.monitors().len();
     let ws = state.workspaces().len();
     let win = state.windows().len();
     let tree = state.root_container.descendants().count();
     let ign = state.ignored_windows.len();
     let ghosts = state.disconnected_monitors.len();
-    tracing::error!(
-      "MEM: ws={ws_mb}MB commit={commit_mb}MB | mon={mon} ws={ws} \
-       win={win} tree={tree} ign={ign} ghosts={ghosts}"
+
+    let log_path = home::home_dir().map_or_else(
+      || std::path::PathBuf::from("errors.log"),
+      |h| h.join(".glzr/glazewm/errors.log"),
     );
+
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+      .create(true)
+      .append(true)
+      .open(&log_path)
+    {
+      let _ = writeln!(
+        file,
+        "MEM: ws={ws_mb}MB commit={commit_mb}MB avail={avail_mb}MB \
+         | mon={mon} ws={ws} win={win} tree={tree} ign={ign} \
+         ghosts={ghosts}"
+      );
+      let _ = file.flush();
+    }
   }
 }
 
@@ -131,6 +150,49 @@ fn memory_mb() -> Option<(usize, usize)> {
         pmc.WorkingSetSize / (1024 * 1024),
         pmc.PagefileUsage / (1024 * 1024),
       ))
+    } else {
+      None
+    }
+  }
+}
+
+/// Returns system-wide available physical RAM in MB.
+///
+/// Uses `GlobalMemoryStatusEx` to query the amount of physical memory
+/// available to be allocated. This distinguishes glazewm-internal OOM
+/// (low `avail=` when glazewm's own `commit=` is small) from system
+/// memory pressure causing the failure.
+#[cfg(target_os = "windows")]
+fn system_avail_mb() -> Option<u64> {
+  // SAFETY: `MEMORYSTATUSEX` is a plain C struct; `dwLength` must be set
+  // to its size before calling `GlobalMemoryStatusEx`. The function fills
+  // the struct on success (non-zero return).
+  #[repr(C)]
+  #[allow(non_snake_case, non_camel_case_types)]
+  struct MEMORYSTATUSEX {
+    dwLength: u32,
+    dwMemoryLoad: u32,
+    ullTotalPhys: u64,
+    ullAvailPhys: u64,
+    ullTotalPageFile: u64,
+    ullAvailPageFile: u64,
+    ullTotalVirtual: u64,
+    ullAvailVirtual: u64,
+    ullAvailExtendedVirtual: u64,
+  }
+
+  extern "system" {
+    fn GlobalMemoryStatusEx(lpBuffer: *mut MEMORYSTATUSEX) -> i32;
+  }
+
+  unsafe {
+    let mut mem_status = std::mem::zeroed::<MEMORYSTATUSEX>();
+    mem_status.dwLength =
+      u32::try_from(std::mem::size_of::<MEMORYSTATUSEX>())
+        .unwrap_or_default();
+
+    if GlobalMemoryStatusEx(&raw mut mem_status) != 0 {
+      Some(mem_status.ullAvailPhys / (1024 * 1024))
     } else {
       None
     }
