@@ -315,11 +315,20 @@ async fn start_wm(
           tracing::warn!("Failed to re-register keyboard hook: {}", err);
         }
 
-        if wm.state.is_paused {
+        // Wrap cleanup in `catch_unwind` to prevent a panic from
+        // aborting the process — `process_event` is similarly protected.
+        // Any panic is logged; the WM continues until the next tick.
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+          if wm.state.is_paused {
+            Ok(())
+          } else {
+            wm.state.cleanup_invalid_windows()
+          }
+        }))
+        .unwrap_or_else(|_| {
+          tracing::error!("Panic in cleanup tick.");
           Ok(())
-        } else {
-          wm.state.cleanup_invalid_windows()
-        }
+        })
       },
       Some((
         message,
