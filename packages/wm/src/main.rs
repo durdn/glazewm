@@ -210,11 +210,20 @@ async fn start_wm(
         wm.process_event(PlatformEvent::Keybinding(event), &mut config)
       }
       _ = cleanup_interval.tick() => {
-        if wm.state.is_paused {
+        // Wrap cleanup in `catch_unwind` to prevent a panic from
+        // aborting the process — `process_event` is similarly protected.
+        // Any panic is logged; the WM continues until the next tick.
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+          if wm.state.is_paused {
+            Ok(())
+          } else {
+            wm.state.cleanup_invalid_windows()
+          }
+        }))
+        .unwrap_or_else(|_| {
+          tracing::error!("Panic in cleanup tick.");
           Ok(())
-        } else {
-          wm.state.cleanup_invalid_windows()
-        }
+        })
       },
       Some((
         message,
