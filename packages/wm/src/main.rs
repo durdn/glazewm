@@ -71,12 +71,17 @@ fn install_panic_hook() {
 ///
 /// Written directly to `errors.log` (unbuffered), bypassing the tracing
 /// buffer so the line is on disk even if the process aborts immediately
-/// after. The `avail=` field reflects system-wide free physical RAM and
-/// distinguishes glazewm-internal OOM from system memory pressure.
+/// after. Fields:
+/// - `avail=` — free physical RAM (low = system memory pressure)
+/// - `avail_page=` — available commit charge / page file headroom (low =
+///   allocations fail even with free physical RAM)
+/// - `avail_virt=` — available virtual address space in this process (low =
+///   VA exhaustion, allocations fail regardless of physical/page file)
 fn log_memory_diagnostics(state: &WmState) {
   #[cfg(target_os = "windows")]
   if let Some((ws_mb, commit_mb)) = memory_mb() {
-    let avail_mb = system_avail_mb().unwrap_or(0);
+    let (avail_mb, avail_page_mb, avail_virt_mb) =
+      system_avail_mb().unwrap_or((0, 0, 0));
     let mon = state.monitors().len();
     let ws = state.workspaces().len();
     let win = state.windows().len();
@@ -97,6 +102,7 @@ fn log_memory_diagnostics(state: &WmState) {
       let _ = writeln!(
         file,
         "MEM: ws={ws_mb}MB commit={commit_mb}MB avail={avail_mb}MB \
+         avail_page={avail_page_mb}MB avail_virt={avail_virt_mb}MB \
          | mon={mon} ws={ws} win={win} tree={tree} ign={ign} \
          ghosts={ghosts}"
       );
@@ -156,14 +162,15 @@ fn memory_mb() -> Option<(usize, usize)> {
   }
 }
 
-/// Returns system-wide available physical RAM in MB.
+/// Returns `(avail_phys_mb, avail_page_mb, avail_virt_mb)` from the system.
 ///
-/// Uses `GlobalMemoryStatusEx` to query the amount of physical memory
-/// available to be allocated. This distinguishes glazewm-internal OOM
-/// (low `avail=` when glazewm's own `commit=` is small) from system
-/// memory pressure causing the failure.
+/// - `avail_phys_mb` — free physical RAM. Low = system memory pressure.
+/// - `avail_page_mb` — available commit charge (page file + physical RAM
+///   headroom). Low = allocations fail even with free physical RAM.
+/// - `avail_virt_mb` — free virtual address space in this process. Low =
+///   VA exhaustion; allocations fail regardless of physical or page file.
 #[cfg(target_os = "windows")]
-fn system_avail_mb() -> Option<u64> {
+fn system_avail_mb() -> Option<(u64, u64, u64)> {
   // SAFETY: `MEMORYSTATUSEX` is a plain C struct; `dwLength` must be set
   // to its size before calling `GlobalMemoryStatusEx`. The function fills
   // the struct on success (non-zero return).
@@ -192,7 +199,11 @@ fn system_avail_mb() -> Option<u64> {
         .unwrap_or_default();
 
     if GlobalMemoryStatusEx(&raw mut mem_status) != 0 {
-      Some(mem_status.ullAvailPhys / (1024 * 1024))
+      Some((
+        mem_status.ullAvailPhys / (1024 * 1024),
+        mem_status.ullAvailPageFile / (1024 * 1024),
+        mem_status.ullAvailVirtual / (1024 * 1024),
+      ))
     } else {
       None
     }
