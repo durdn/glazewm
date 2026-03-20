@@ -29,9 +29,11 @@ use wm_platform::{
   WindowListener,
 };
 
+#[cfg(target_os = "windows")]
+use crate::traits::CommonGetters;
 use crate::{
-  ipc_server::IpcServer, sys_tray::SystemTray, traits::CommonGetters,
-  user_config::UserConfig, wm::WindowManager, wm_state::WmState,
+  ipc_server::IpcServer, sys_tray::SystemTray, user_config::UserConfig,
+  wm::WindowManager, wm_state::WmState,
 };
 
 mod commands;
@@ -77,6 +79,7 @@ fn install_panic_hook() {
 ///   allocations fail even with free physical RAM)
 /// - `avail_virt=` — available virtual address space in this process (low
 ///   = VA exhaustion, allocations fail regardless of physical/page file)
+#[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
 fn log_memory_diagnostics(state: &WmState) {
   #[cfg(target_os = "windows")]
   if let Some((ws_mb, commit_mb)) = memory_mb() {
@@ -176,7 +179,11 @@ fn system_avail_mb() -> Option<(u64, u64, u64)> {
   // to its size before calling `GlobalMemoryStatusEx`. The function fills
   // the struct on success (non-zero return).
   #[repr(C)]
-  #[allow(non_snake_case, non_camel_case_types)]
+  #[allow(
+    non_snake_case,
+    non_camel_case_types,
+    clippy::upper_case_acronyms
+  )]
   struct MEMORYSTATUSEX {
     dwLength: u32,
     dwMemoryLoad: u32,
