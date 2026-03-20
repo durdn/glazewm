@@ -75,8 +75,8 @@ fn install_panic_hook() {
 /// - `avail=` — free physical RAM (low = system memory pressure)
 /// - `avail_page=` — available commit charge / page file headroom (low =
 ///   allocations fail even with free physical RAM)
-/// - `avail_virt=` — available virtual address space in this process (low =
-///   VA exhaustion, allocations fail regardless of physical/page file)
+/// - `avail_virt=` — available virtual address space in this process (low
+///   = VA exhaustion, allocations fail regardless of physical/page file)
 fn log_memory_diagnostics(state: &WmState) {
   #[cfg(target_os = "windows")]
   if let Some((ws_mb, commit_mb)) = memory_mb() {
@@ -162,7 +162,8 @@ fn memory_mb() -> Option<(usize, usize)> {
   }
 }
 
-/// Returns `(avail_phys_mb, avail_page_mb, avail_virt_mb)` from the system.
+/// Returns `(avail_phys_mb, avail_page_mb, avail_virt_mb)` from the
+/// system.
 ///
 /// - `avail_phys_mb` — free physical RAM. Low = system memory pressure.
 /// - `avail_page_mb` — available commit charge (page file + physical RAM
