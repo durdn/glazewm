@@ -651,6 +651,9 @@ impl Dispatcher {
       let normalized_path = std::fs::canonicalize(path)?;
       std::process::Command::new("explorer")
         .arg(normalized_path)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .spawn()?;
     }
     #[cfg(target_os = "macos")]
@@ -658,6 +661,9 @@ impl Dispatcher {
       std::process::Command::new("open")
         .arg(path)
         .arg("-R")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .spawn()?;
     }
 

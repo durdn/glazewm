@@ -541,6 +541,9 @@ fn start_watcher_process() -> anyhow::Result<tokio::process::Child, Error>
     .join("glazewm-watcher");
 
   Command::new(&watcher_path)
+    .stdin(process::Stdio::null())
+    .stdout(process::Stdio::null())
+    .stderr(process::Stdio::null())
     .spawn()
     .context("Failed to start watcher process.")
 }
