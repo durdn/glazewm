@@ -428,7 +428,15 @@ async fn start_wm(
         // aborting the process — `process_event` is similarly protected.
         // Any panic is logged; the WM continues until the next tick.
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-          if wm.state.is_paused {
+          // Skip cleanup when the system is under virtual-memory commit
+          // pressure (e.g. immediately after wake from sleep or during
+          // system startup). The allocations inside
+          // `cleanup_invalid_windows` can trigger an OOM abort at exactly
+          // these moments. The work is deferred, not dropped — the next
+          // tick (5 seconds later) retries once pressure subsides.
+          if wm.state.is_paused
+            || dispatcher.is_under_commit_pressure()
+          {
             Ok(())
           } else {
             wm.state.cleanup_invalid_windows()
